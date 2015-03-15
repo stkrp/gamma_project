@@ -190,26 +190,6 @@ class Graph(object):
             print('Граф пуст')
             return False
 
-    def split(self, start_vertex, finish_vertex):
-        """ Разбить цикл на 2 графа по цепи между двумя вершинами """
-        if not (start_vertex == finish_vertex or self.has_edge(start_vertex, finish_vertex)):
-            if self.is_simple_cycle():
-                first_graph = Graph(
-                    chain=self.find_simple_chain(start_vertex, finish_vertex),
-                    type_='chain',
-                    size=self.get_size()
-                )
-                second_graph = self - first_graph
-                first_graph.create_edge(start_vertex, finish_vertex)
-                second_graph.create_edge(start_vertex, finish_vertex)
-                return first_graph, second_graph
-            else:
-                print('Граф не является простым циклом')
-                return None
-        else:
-            print('Вершины начала и конца совпадают или смежны')
-            return None
-
 
 class GammaGraph(Graph):
     """ 'Плоский' граф (граф, полученный в процессе укладки Graph) """
@@ -228,7 +208,7 @@ class GammaGraph(Graph):
         size = self.get_size()
         return [i for i in range(size) if self.ADJACENCY_MATRIX[i]]
 
-    def get_macrosegment(self, start_vertex, segment=None):
+    def _get_macrosegment(self, start_vertex, segment=None):
         """ Получить сегмент с неконтактными вершинами """
         if segment is None:
             segment = Segment(adjacency_matrix=self.create_empty_adjacency_matrix_copy(), gamma_graph=self)
@@ -239,10 +219,10 @@ class GammaGraph(Graph):
                 segment.create_edge(start_vertex, adjacent_vertex)
                 self._segments_graph.delete_edge(start_vertex, adjacent_vertex)
                 if adjacent_vertex not in contact_vertices:
-                    segment = self.get_macrosegment(adjacent_vertex, segment)
+                    segment = self._get_macrosegment(adjacent_vertex, segment)
         return segment
 
-    def get_minisegment(self, start_vertex, finish_vertex):
+    def _get_minisegment(self, start_vertex, finish_vertex):
         """ Получить сегмент, состоящий из одного ребра """
         contact_vertices = self.get_vertices()
         if (
@@ -257,7 +237,7 @@ class GammaGraph(Graph):
         else:
             return Graph(adjacency_matrix=self.create_empty_adjacency_matrix_copy())
 
-    def get_segments(self):
+    def _get_segments(self):
         segments = []
         self._segments_graph = self.original_graph - self
         contact_vertices = self.get_vertices()
@@ -266,16 +246,46 @@ class GammaGraph(Graph):
                 adjacent_vertices = self._segments_graph.get_adjacent_vertices(contact_vertex)
                 for adjacent_vertex in adjacent_vertices:
                     if adjacent_vertices in contact_vertices:
-                        minisegment = self.get_minisegment(contact_vertex, adjacent_vertex)
+                        minisegment = self._get_minisegment(contact_vertex, adjacent_vertex)
                         if not minisegment.is_empty():
                             segments.append(minisegment)
-                macrosegment = self.get_macrosegment(contact_vertex)
+                macrosegment = self._get_macrosegment(contact_vertex)
                 if not macrosegment.is_empty():
                     segments.append(macrosegment)
             if self._segments_graph.is_empty():
                 break
 
         return segments
+
+
+class Face(Graph):
+    def split(self, chain):
+        if len(chain) > 1:
+            start_vertex = chain[0]
+            finish_vertex = chain[-1]
+            """ Разбить грань на 2 грани по цепи между двумя вершинами """
+            if not (start_vertex == finish_vertex or self.has_edge(start_vertex, finish_vertex)):
+                if self.is_simple_cycle():
+                    first_face = self.__class__(
+                        chain=self.find_simple_chain(start_vertex, finish_vertex),
+                        type_='chain',
+                        size=self.get_size()
+                    )
+                    second_face = self - first_face
+
+                    chain_graph = Graph(chain=chain, type_='chain', size=self.get_size())
+                    first_face += chain_graph
+                    second_face += chain_graph
+                    return first_face, second_face
+                else:
+                    print('Граф не является простым циклом')
+                    return None
+            else:
+                print('Вершины начала и конца совпадают или смежны')
+                return None
+        else:
+            print('Цепь состоит менее чем из 2-х вершин')
+            return None
 
 
 class Segment(Graph):
@@ -319,12 +329,13 @@ if __name__ == '__main__':
     ]
 
     g1 = Graph(adjacency_matrix=matrix)
-    print('split', g1.split(1, 4), sep='\n')
+    # print('split', g1.split(1, 4), sep='\n')
     gg1 = GammaGraph(g1)
+    face1 = Face(adjacency_matrix=gg1.ADJACENCY_MATRIX)
 
-    print(gg1.is_simple_cycle())
+    # print(gg1.is_simple_cycle())
 
-    print('Start cycle:', gg1.get_vertices())
-    print(*gg1.get_segments(), sep='\n')
-
-    print('split', *gg1.split(1, 4), sep='\n')
+    # print('Start cycle:', gg1.get_vertices())
+    # print(*gg1._get_segments(), sep='\n')
+    print(gg1)
+    print('split', *face1.split([1, 6, 8, 4]), sep='\n')

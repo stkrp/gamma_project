@@ -168,7 +168,7 @@ class Graph(object):
                         continue
             else:
                 next_step = self.get_simple_cycle(vertex, path, save_start_vertex=save_start_vertex)
-                if isinstance(next_step, list):
+                if isinstance(next_step, list) and next_step:
                     return next_step
 
         return []
@@ -186,7 +186,7 @@ class Graph(object):
                     path.append(vertex)
                     return path
                 next_step = self.get_simple_chain(vertex, finish_vertex, path)
-                if isinstance(next_step, list):
+                if isinstance(next_step, list) and next_step:
                     return next_step
 
         return []
@@ -210,9 +210,12 @@ class Graph(object):
         if graph_vertices:
             start_vertex = graph_vertices.pop()
             cycle = self.get_simple_cycle(start_vertex)
-            cycle_graph = Graph(chain=cycle, type_='cycle', len_=len(self))
-            if (self - cycle_graph).is_empty():
-                return True
+            if cycle:
+                cycle_graph = Graph(chain=cycle, type_='cycle', len_=len(self))
+                if (self - cycle_graph).is_empty():
+                    return True
+                else:
+                    return False
             else:
                 return False
         else:
@@ -255,35 +258,44 @@ class GammaGraph(Graph):
                     for i, face in enumerate(self.faces):
                         # Получение 2-х новых граней из выбранной, полученных при помощи цепи минимального сегмента
                         if min_segment.included_in_face(face):
-                            min_segment_contact_vertices = list(min_segment.get_contact_vertices())
-                            start_contact_vertex = min_segment_contact_vertices.pop(0)
-                            if not min_segment_contact_vertices:
-                                finish_contact_vertex = start_contact_vertex
-                            else:
-                                finish_contact_vertex = min_segment_contact_vertices.pop()
-                            if start_contact_vertex != finish_contact_vertex:
-                                min_segment_chain = []
-                                while True:
-                                    min_segment_chain = min_segment.get_simple_chain_without_contact_vertices(
-                                        start_contact_vertex, finish_contact_vertex
-                                    )
-                                    new_faces = face.split(min_segment_chain)
-                                    if new_faces:
-                                        del self.faces[i]
-                                        self.faces.extend(new_faces)
-                                        break
-                                    elif min_segment_contact_vertices:
-                                        finish_contact_vertex = min_segment_contact_vertices.pop()
-                                    else:
-                                        raise RuntimeError('Не найдены вершины для вписывания цепи сегмента в грань')
-                                gamma_graph_update = Graph(chain=min_segment_chain, type_='chain', len_=len(self))
-                            else:
-                                min_segment_chain = min_segment.get_simple_cycle(
-                                    start_contact_vertex, None, save_start_vertex=True
+                            min_segment_contact_vertices = min_segment.get_contact_vertices()
+                            for start_contact_vertex in min_segment_contact_vertices:
+                                min_segment_contact_vertices_without_start_vertex = (
+                                    min_segment_contact_vertices - {start_contact_vertex}
                                 )
-                                new_face = Face(chain=min_segment_chain, type_='cycle', len_=len(self))
-                                self.faces.extend(deepcopy(new_face) for i in range(2))
-                                gamma_graph_update = Graph(adjacency_matrix=new_face.ADJACENCY_MATRIX)
+                                if not min_segment_contact_vertices_without_start_vertex:
+                                    min_segment_chain = min_segment.get_simple_cycle(
+                                        start_contact_vertex, None, save_start_vertex=True
+                                    )
+                                    if min_segment_chain:
+                                        new_face = Face(chain=min_segment_chain, type_='cycle', len_=len(self))
+                                        self.faces.extend(deepcopy(new_face) for i in range(2))
+                                        gamma_graph_update = Graph(adjacency_matrix=new_face.ADJACENCY_MATRIX)
+                                        break
+                                else:
+                                    for finish_contact_vertex in min_segment_contact_vertices_without_start_vertex:
+                                        min_segment_chain = (
+                                            min_segment.get_simple_chain_without_contact_vertices(
+                                                start_contact_vertex, finish_contact_vertex
+                                            )
+                                        )
+                                        if not min_segment_chain:
+                                            continue
+                                        new_faces = face.split(min_segment_chain)
+                                        if new_faces:
+                                            del self.faces[i]
+                                            self.faces.extend(new_faces)
+                                            gamma_graph_update = Graph(
+                                                chain=min_segment_chain, type_='chain', len_=len(self)
+                                            )
+                                            break
+                                    else:
+                                        continue
+                                    break
+                            else:
+                                raise RuntimeError(
+                                    'Не найдены вершины для вписывания цепи сегмента в грань'
+                                )
 
                             self.ADJACENCY_MATRIX = (
                                 (Graph(adjacency_matrix=self.ADJACENCY_MATRIX) + gamma_graph_update).ADJACENCY_MATRIX
@@ -348,6 +360,25 @@ class GammaGraph(Graph):
 
         return segments
 
+    def _get_vertex_sequence_for_paint(self, vertex, sequence=None, prev_adjacent_vertex=None):
+        # TODO: Не готово
+        """ Получить последовательность вершин """
+        if sequence is None:
+            sequence = []
+        if prev_adjacent_vertex is None:
+            prev_adjacent_vertex = set()
+        adjacent_vertex = self.get_adjacent_vertices(vertex)
+        next_vertices = adjacent_vertex - set(sequence) - prev_adjacent_vertex
+        if next_vertices:
+            next_vertex = next_vertices.pop()
+            sequence.append(next_vertex)
+            if self.get_vertices() == set(sequence):
+                return sequence
+            else:
+                sequence = self._get_vertex_sequence_for_paint(next_vertex, sequence, next_vertices)
+
+        # sequence.append()
+
     def get_faces_as_chains(self):
         """ Получить грани в виде цепей """
         return (face.get_simple_cycle(face.get_vertices().pop()) for face in self.faces if not face.is_empty())
@@ -364,10 +395,7 @@ class Face(Graph):
             start_vertex = chain[0]
             finish_vertex = chain[-1]
             """ Разбить грань на 2 грани по цепи между двумя вершинами """
-            if not (
-                start_vertex == finish_vertex or
-                self.has_edge(start_vertex, finish_vertex) and len(chain) <= 2
-            ):
+            if not (start_vertex == finish_vertex):
                 if self.is_simple_cycle():
                     first_face = self.__class__(
                         chain=self.get_simple_chain(start_vertex, finish_vertex),
@@ -384,7 +412,7 @@ class Face(Graph):
                     print('Граф не является простым циклом')
                     return ()
             else:
-                print('Вершины начала и конца совпадают или смежны')
+                print('Вершины начала и конца совпадают')
                 return ()
         else:
             print('Цепь состоит менее чем из 2-х вершин')
@@ -428,14 +456,14 @@ class Segment(Graph):
                     path.append(vertex)
                     return path
                 next_step = self.get_simple_chain_without_contact_vertices(vertex, finish_vertex, path)
-                if isinstance(next_step, list):
+                if isinstance(next_step, list) and next_step:
                     return next_step
 
-        return path
+        return []
 
 if __name__ == '__main__':
     import sys
-    sys.stdout = open('output.txt', 'wt', encoding='utf-8')
+    # sys.stdout = open('output.txt', 'wt', encoding='utf-8')
 
     matrix1 = [
         [0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0],
@@ -465,9 +493,9 @@ if __name__ == '__main__':
 
     matrix3 = [
         [0, 1, 0, 1, 0, 0],
-        [1, 0, 1, 0, 0, 0],  # [1, 0, 1, 1, 0, 0],
+        [1, 0, 1, 0, 0, 0],
         [0, 1, 0, 1, 0, 0],
-        [1, 0, 1, 0, 1, 1],  # [1, 1, 1, 0, 1, 1],
+        [1, 0, 1, 0, 1, 1],
         [0, 0, 0, 1, 0, 1],
         [0, 0, 0, 1, 1, 0],
     ]
@@ -481,22 +509,51 @@ if __name__ == '__main__':
         [0, 0, 0, 1, 1, 0],
     ]
 
-    g1 = Graph(adjacency_matrix=matrix1)
-    gg1 = GammaGraph(original_graph=g1)
+    # 2
+    matrix5 = [
+        [0, 1, 0, 0, 0, 0, 1, 1, 1],
+        [1, 0, 1, 0, 0, 0, 0, 0, 0],
+        [0, 1, 0, 1, 0, 1, 1, 1, 0],
+        [0, 0, 1, 0, 1, 0, 0, 0, 0],
+        [0, 0, 0, 1, 0, 1, 1, 1, 0],
+        [0, 0, 1, 0, 1, 0, 1, 0, 1],
+        [1, 0, 1, 0, 1, 1, 0, 1, 0],
+        [1, 0, 1, 0, 1, 0, 1, 0, 0],
+        [1, 0, 0, 0, 0, 1, 0, 0, 0],
+    ]
+    # 3
+    matrix6 = [
+        [0, 1, 1, 1],
+        [1, 0, 1, 1],
+        [1, 1, 0, 1],
+        [1, 1, 1, 0],
+    ]
+    # 4
+    matrix7 = [
+        [0, 1, 0, 1, 1, 0],
+        [1, 0, 1, 0, 0, 1],
+        [0, 1, 0, 1, 0, 1],
+        [1, 0, 1, 0, 1, 0],
+        [1, 0, 0, 1, 0, 1],
+        [0, 1, 1, 0, 1, 0],
+    ]
+    # 5
+    matrix8 = [
+        [0, 1, 0, 1, 0, 1],
+        [1, 0, 1, 0, 1, 0],
+        [0, 1, 0, 1, 0, 1],
+        [1, 0, 1, 0, 1, 0],
+        [0, 1, 0, 1, 0, 1],
+        [1, 0, 1, 0, 1, 0],
+    ]
 
-    g2 = Graph(adjacency_matrix=matrix2)
-    gg2 = GammaGraph(original_graph=g2)
-
-    g3 = Graph(adjacency_matrix=matrix1)
-    gg3 = GammaGraph(original_graph=g3)
-
-    g4 = Graph(adjacency_matrix=matrix1)
-    gg4 = GammaGraph(original_graph=g4)
-
-    print('Faces gg1', *gg1.get_faces_as_chains(), sep='\n')
-    print('Faces gg2', *gg2.get_faces_as_chains(), sep='\n')
-    print('Faces gg3', *gg3.get_faces_as_chains(), sep='\n')
-    print('Faces gg4', *gg4.get_faces_as_chains(), sep='\n')
+    for k, matrix in enumerate((matrix1, matrix2, matrix3, matrix4, matrix5, matrix6, matrix7, matrix8)):
+        try:
+            graph = Graph(adjacency_matrix=matrix)
+            ggraph = GammaGraph(original_graph=graph)
+            print('Graph #{} faces:'.format(k), *ggraph.get_faces_as_chains(), sep='\n')
+        except Exception as err:
+            print('Graph #{} (error: {})'.format(k, err))
 
     # help(Graph)
     # help(GammaGraph)

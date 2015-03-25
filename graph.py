@@ -9,6 +9,7 @@ from copy import deepcopy
 
 # TODO: Добавить проверку на мультиграф
 # TODO: Что делать, если есть точки сочленения?
+# TODO: Ошибка: остается внешняя грань в графе с точкой сочленения (см. matrix4)
 
 class Graph(object):
     """ Граф """
@@ -229,7 +230,7 @@ class GammaGraph(Graph):
         if original_graph is None:
             Graph.__init__(self, adjacency_matrix=adjacency_matrix, chain=chain, type_=type_, len_=len_)
             self._original_graph = self.create_empty_adjacency_matrix_copy()
-            self.faces = [Face(adjacency_matrix=self.ADJACENCY_MATRIX) for i in range(2)]
+            self.faces = [Face(adjacency_matrix=self.ADJACENCY_MATRIX, gamma_graph=self) for i in range(2)]
         # TODO: Добавить все проверки original_graph вместо True
         elif True:
             self._original_graph = deepcopy(original_graph)
@@ -239,7 +240,7 @@ class GammaGraph(Graph):
                 type_='cycle',
                 len_=len(self._original_graph)
             )
-            self.faces = [Face(adjacency_matrix=self.ADJACENCY_MATRIX) for i in range(2)]
+            self.faces = [Face(adjacency_matrix=self.ADJACENCY_MATRIX, gamma_graph=self) for i in range(2)]
             while True:
                 self._segments = self._get_segments()
                 if self._segments:
@@ -268,7 +269,12 @@ class GammaGraph(Graph):
                                         start_contact_vertex, None, save_start_vertex=True
                                     )
                                     if min_segment_chain:
-                                        new_face = Face(chain=min_segment_chain, type_='cycle', len_=len(self))
+                                        new_face = Face(
+                                            chain=min_segment_chain,
+                                            type_='cycle',
+                                            len_=len(self),
+                                            gamma_graph=self
+                                        )
                                         self.faces.extend(deepcopy(new_face) for i in range(2))
                                         gamma_graph_update = Graph(adjacency_matrix=new_face.ADJACENCY_MATRIX)
                                         break
@@ -283,8 +289,7 @@ class GammaGraph(Graph):
                                             continue
                                         new_faces = face.split(min_segment_chain)
                                         if new_faces:
-                                            del self.faces[i]
-                                            self.faces.extend(new_faces)
+                                            self.faces[i:i+1] = new_faces
                                             gamma_graph_update = Graph(
                                                 chain=min_segment_chain, type_='chain', len_=len(self)
                                             )
@@ -381,7 +386,7 @@ class GammaGraph(Graph):
 
     def get_faces_as_chains(self):
         """ Получить грани в виде цепей """
-        return (face.get_simple_cycle(face.get_vertices().pop()) for face in self.faces if not face.is_empty())
+        return (face.as_chain() for face in self.faces if not face.is_empty())
 
 
 class Face(Graph):
@@ -390,6 +395,10 @@ class Face(Graph):
         self._gamma_graph = gamma_graph
         Graph.__init__(self, adjacency_matrix=adjacency_matrix, chain=chain, type_=type_, len_=len_)
 
+    def as_chain(self):
+        """ Получить в виде цепи """
+        return self.get_simple_cycle(self.get_vertices().pop(), save_start_vertex=True)
+
     def split(self, chain):
         if len(chain) > 1:
             start_vertex = chain[0]
@@ -397,17 +406,20 @@ class Face(Graph):
             """ Разбить грань на 2 грани по цепи между двумя вершинами """
             if not (start_vertex == finish_vertex):
                 if self.is_simple_cycle():
-                    first_face = self.__class__(
+                    first_face_graph = Graph(
                         chain=self.get_simple_chain(start_vertex, finish_vertex),
                         type_='chain',
                         len_=len(self)
                     )
-                    second_face = self - first_face
+                    second_face_graph = self - first_face_graph
 
                     chain_graph = Graph(chain=chain, type_='chain', len_=len(self))
-                    first_face += chain_graph
-                    second_face += chain_graph
-                    return first_face, second_face
+                    first_face_graph += chain_graph
+                    second_face_graph += chain_graph
+                    return (
+                        Face(adjacency_matrix=first_face_graph.ADJACENCY_MATRIX, gamma_graph=self._gamma_graph),
+                        Face(adjacency_matrix=second_face_graph.ADJACENCY_MATRIX, gamma_graph=self._gamma_graph)
+                    )
                 else:
                     print('Граф не является простым циклом')
                     return ()
@@ -417,6 +429,20 @@ class Face(Graph):
         else:
             print('Цепь состоит менее чем из 2-х вершин')
             return ()
+
+    def is_outer_face(self):
+        """ Является ли грань внешней """
+        summary_face = Face(adjacency_matrix=self.create_empty_adjacency_matrix_copy(), gamma_graph=self._gamma_graph)
+        for face in self._gamma_graph.faces:
+            if face == self:
+                continue
+            difference = face * summary_face
+            summary_face -= difference
+            summary_face += face - difference
+        if summary_face == self:
+            return True
+        else:
+            return False
 
 
 class Segment(Graph):
@@ -547,11 +573,16 @@ if __name__ == '__main__':
         [1, 0, 1, 0, 1, 0],
     ]
 
-    for k, matrix in enumerate((matrix1, matrix2, matrix3, matrix4, matrix5, matrix6, matrix7, matrix8)):
+    for k, matrix in enumerate((matrix1, matrix2, matrix3, matrix4, matrix5, matrix6, matrix7, matrix8), start=1):
         try:
             graph = Graph(adjacency_matrix=matrix)
             ggraph = GammaGraph(original_graph=graph)
             print('Graph #{} faces:'.format(k), *ggraph.get_faces_as_chains(), sep='\n')
+            # print('Is outer face:')
+            # for face in ggraph.faces:
+            #     print(face.as_chain(), face.is_outer_face())
+            # DEBUG
+            # print('Vertices:', {i: ggraph.get_adjacent_vertices(i) for i in range(len(ggraph))})
         except Exception as err:
             print('Graph #{} (error: {})'.format(k, err))
 

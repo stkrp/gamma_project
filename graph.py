@@ -8,14 +8,6 @@ from copy import deepcopy
 
 
 # TODO: Добавить проверку на мультиграф
-# TODO: Что делать, если есть точки сочленения?
-# TODO: Ошибка: остается внешняя грань в графе с точкой сочленения (см. matrix4)
-# В случае точки сочленения, возникает две различных внешних грани, однако это не влияет на работу алгоритма,
-# поскольку случай, когда потребуется вставить в "действительную" внешнюю грань цепь - невозможен, т. к. в такой
-# ситуации точка сочленения не имела бы места. Следовательно, даже если нам потребуется добавлять цепи в "мнимые"
-# внешние грани, они будут обрабатываться верно и могут быть интерпритированны в отдельности друг от друга.
-# На рисование как "действительная" внешняя, так и "мнимые" внешние грани, не влияют, поскольку мы не рисуем
-# ребра дважды.
 
 class Graph(object):
     """ Граф """
@@ -486,7 +478,7 @@ class Segment(Graph):
         return []
 
 if __name__ == '__main__':
-    import sys
+    # import sys
     # sys.stdout = open('output.txt', 'wt', encoding='utf-8')
 
     matrix1 = [
@@ -601,19 +593,59 @@ if __name__ == '__main__':
         [0, 0, 0, 0, 1, 0, 1, 1, 0, 0],
     ]
 
+    matrix12 = [
+        [0, 1, 0, 0, 0, 0, 0, 1, 0, 0],
+        [1, 0, 1, 0, 0, 1, 0, 0, 1, 0],
+        [0, 1, 0, 1, 0, 0, 1, 0, 1, 0],
+        [0, 0, 1, 0, 0, 0, 0, 1, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
+        [0, 1, 0, 0, 0, 0, 1, 0, 0, 0],
+        [0, 0, 1, 0, 0, 1, 0, 0, 0, 0],
+        [1, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+        [0, 1, 1, 0, 1, 0, 0, 0, 0, 1],
+        [0, 0, 0, 0, 1, 0, 0, 0, 1, 0],
+    ]
+    # K4 + K4
+    matrix13 = [
+        [0, 1, 1, 1, 0, 0, 0],
+        [1, 0, 1, 1, 0, 0, 0],
+        [1, 1, 0, 1, 1, 1, 1],
+        [1, 1, 1, 0, 0, 0, 0],
+        [0, 0, 1, 0, 0, 1, 1],
+        [0, 0, 1, 0, 1, 0, 1],
+        [0, 0, 1, 0, 1, 1, 0],
+    ]
+
+    matrix14 = [
+        [0, 1, 1, 1, 0, 0, 0, 0, 0],
+        [1, 0, 1, 1, 0, 0, 0, 0, 0],
+        [1, 1, 0, 1, 1, 0, 0, 0, 0],
+        [1, 1, 1, 0, 0, 0, 0, 0, 0],
+        [0, 0, 1, 0, 0, 1, 0, 0, 0],
+        [0, 0, 0, 0, 1, 0, 1, 1, 1],
+        [0, 0, 0, 0, 0, 1, 0, 1, 1],
+        [0, 0, 0, 0, 0, 1, 1, 0, 1],
+        [0, 0, 0, 0, 0, 1, 1, 1, 0],
+    ]
+
     for k, matrix in enumerate(
-        (matrix1, matrix2, matrix3, matrix4, matrix5, matrix6, matrix7, matrix8, matrix9, matrix10, matrix11),
+        (
+            matrix1, matrix2, matrix3, matrix4, matrix5, matrix6, matrix7, matrix8, matrix9, matrix10, matrix11,
+            matrix12, matrix13,  # matrix14
+        ),
         start=1
     ):
+        print('===== Граф #{} ====='.format(k))
         try:
             graph = Graph(adjacency_matrix=matrix)
             ggraph = GammaGraph(original_graph=graph)
-            print('Graph #{} faces:'.format(k), *ggraph.get_faces_as_chains(), sep='\n')
-            print('hierarchy')
+            print('- Все грани -', *ggraph.get_faces_as_chains(), sep='\n')
+            print('- Иерархия граней -')
             for face in ggraph.faces_hierarchy:
-                face.print_subfaces()
+                face.print_subfaces(face_title='Грань')
         except Exception as err:
-            print('Graph #{} (error: {})'.format(k, err))
+            print('Ошибка: {}'.format(err))
+        print('\n', end='')
 
     # help(Graph)
     # help(GammaGraph)

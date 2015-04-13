@@ -148,6 +148,52 @@ class Graph(object):
         else:
             return set()
 
+    def get_bridges(self):
+        """ Получить список мостов """
+        if not self.is_connected():
+            raise ValueError('Граф не является связным')
+        bridges = []
+        for i in range(len(self) - 1):
+            start_vertex = i
+            for j in range(len(self) - 1 - i):
+                finish_vertex = i + 1 + j
+                if self.has_edge(start_vertex, finish_vertex):
+                    self_copy = deepcopy(self)
+                    self_copy.delete_edge(start_vertex, finish_vertex)
+                    if not self_copy.is_connected():
+                        bridges.append((start_vertex, finish_vertex))
+        return bridges
+
+    def get_connected_components(self):
+        """ Получить компоненты связности """
+        connected_components = []
+        graph_without_bridges = deepcopy(self)
+        bridges = self.get_bridges()
+        for bridge in bridges:
+            if graph_without_bridges.has_edge(*bridge):
+                graph_without_bridges.delete_edge(*bridge)
+
+        def run(vertex, connected_component=None):
+            if connected_component is None:
+                connected_component = ConnectedComponent(
+                    adjacency_matrix=self.create_empty_adjacency_matrix_copy()
+                )
+                connected_components.append(connected_component)
+            adjacent_vertices = graph_without_bridges.get_adjacent_vertices(vertex)
+            for adjacent_vertex in adjacent_vertices:
+                connected_component.create_edge(vertex, adjacent_vertex)
+                graph_without_bridges.delete_edge(vertex, adjacent_vertex)
+                run(adjacent_vertex, connected_component)
+
+        while True:
+            vertices = graph_without_bridges.get_vertices()
+            if not vertices:
+                break
+            else:
+                run(vertices.pop())
+
+        return connected_components
+
     def get_simple_cycle(self, start_vertex, path=None, *, save_start_vertex=False):
         """ Поиск простого цикла """
         path = [] if path is None else deepcopy(path)
@@ -190,8 +236,14 @@ class Graph(object):
 
         return []
 
-    def check_coherence(self, start_vertex):
+    def is_connected(self, start_vertex=None):
         """ Проверить граф на связность """
+        if start_vertex is None:
+            vertices = self.get_vertices()
+            if vertices:
+                start_vertex = vertices.pop()
+            else:
+                raise ValueError('Граф пуст')
         path = [start_vertex]
         i = 0
         len_ = len(self)
@@ -222,17 +274,23 @@ class Graph(object):
             return False
 
 
-class GammaGraph(Graph):
-    """ 'Плоский' граф (граф, полученный в процессе укладки Graph) """
+class ConnectedComponent(Graph):
     def __init__(self, *, adjacency_matrix=None, chain=None, type_=None, len_=None, original_graph=None):
-        # TODO: Добавить все проверки original_graph вместо True
-        if True:
-            self._original_graph = deepcopy(original_graph)
-            Graph.__init__(
+        Graph.__init__(self, adjacency_matrix=adjacency_matrix, chain=chain, type_=type_, len_=len_)
+        self._original_graph = deepcopy(original_graph)
+
+
+class _GammaGraphConnectedComponent(ConnectedComponent):
+    """ 'Плоская' компонента графа (граф, полученный в процессе укладки Graph) """
+    def __init__(self, *, adjacency_matrix=None, chain=None, type_=None, len_=None, original_graph=None):
+        if original_graph.get_vertices() and original_graph.get_simple_cycle(original_graph.get_vertices().pop()):
+            ConnectedComponent.__init__(
                 self,
-                chain=self._original_graph.get_simple_cycle(0),
+                adjacency_matrix=adjacency_matrix,
+                chain=original_graph.get_simple_cycle(original_graph.get_vertices().pop()),
                 type_='cycle',
-                len_=len(self._original_graph)
+                len_=len(original_graph),
+                original_graph=original_graph
             )
             self.faces = [Face(adjacency_matrix=self.ADJACENCY_MATRIX, gamma_graph=self) for i in range(2)]
             self.faces_hierarchy = []
@@ -243,11 +301,11 @@ class GammaGraph(Graph):
                     # Поиск минимального сегмента (при условии, что для каждого сегмента есть вмещающая грань)
                     min_segment = self._segments[0]
                     if not min_segment.get_inclusive_faces():
-                        raise ValueError('Граф непланарный')
+                        raise ValueError('Граф не является планарным')
                     for segment in self._segments[1:]:
                         segment_inclusive_faces = segment.get_inclusive_faces()
                         if not segment_inclusive_faces:
-                            raise ValueError('Граф непланарный')
+                            raise ValueError('Граф не является планарным')
                         elif len(segment_inclusive_faces) < len(min_segment.get_inclusive_faces()):
                             min_segment = segment
                     # Выбор грани для минмального сегмента
@@ -477,6 +535,27 @@ class Segment(Graph):
 
         return []
 
+
+class GammaGraph(Graph):
+    """ Плоская укладка графа """
+    def __init__(self, *, adjacency_matrix=None, chain=None, type_=None, len_=None, original_graph=None):
+        Graph.__init__(
+            self,
+            adjacency_matrix=adjacency_matrix if adjacency_matrix is not None else original_graph.ADJACENCY_MATRIX,
+            chain=chain, type_=type_, len_=len_
+        )
+        self.connected_components = [
+            _GammaGraphConnectedComponent(original_graph=connected_component)
+            for connected_component
+            in self.get_connected_components()
+        ]
+        self.faces = []
+        self.faces_hierarchy = []
+        for connected_component in self.connected_components:
+            self.faces.extend(connected_component.faces)
+            self.faces_hierarchy.extend(connected_component.faces_hierarchy)
+
+
 if __name__ == '__main__':
     # import sys
     # sys.stdout = open('output.txt', 'wt', encoding='utf-8')
@@ -628,10 +707,18 @@ if __name__ == '__main__':
         [0, 0, 0, 0, 0, 1, 1, 1, 0],
     ]
 
+    matrix15 = [
+        [0, 1, 1, 1, 0],
+        [1, 0, 1, 1, 0],
+        [1, 1, 0, 1, 1],
+        [1, 1, 1, 0, 0],
+        [0, 0, 1, 0, 0],
+    ]
+
     for k, matrix in enumerate(
         (
             matrix1, matrix2, matrix3, matrix4, matrix5, matrix6, matrix7, matrix8, matrix9, matrix10, matrix11,
-            matrix12, matrix13,  # matrix14
+            matrix12, matrix13, matrix14, matrix15
         ),
         start=1
     ):
@@ -639,15 +726,12 @@ if __name__ == '__main__':
         try:
             graph = Graph(adjacency_matrix=matrix)
             ggraph = GammaGraph(original_graph=graph)
-            print('- Все грани -', *ggraph.get_faces_as_chains(), sep='\n')
+            print('- Компоненты связности (шт.) -', len(ggraph.connected_components), sep='\n')
+            print('- Все грани -', *(face.as_chain() for face in ggraph.faces), sep='\n')
+            print('- Мосты -', *ggraph.get_bridges(), sep='\n')
             print('- Иерархия граней -')
             for face in ggraph.faces_hierarchy:
                 face.print_subfaces(face_title='Грань')
         except Exception as err:
             print('Ошибка: {}'.format(err))
         print('\n', end='')
-
-    # help(Graph)
-    # help(GammaGraph)
-    # help(Segment)
-    # help(Face)

@@ -150,30 +150,36 @@ class Graph(object):
 
     def get_bridges(self):
         """ Получить список мостов """
-        if not self.is_connected():
+        if not self.is_connected(skip_empty_vertices=True):
             raise ValueError('Граф не является связным')
         bridges = []
-        for i in range(len(self) - 1):
-            start_vertex = i
-            for j in range(len(self) - 1 - i):
-                finish_vertex = i + 1 + j
-                if self.has_edge(start_vertex, finish_vertex):
+        for i in range(len(self)):
+            for j in range(len(self)):
+                if self.has_edge(i, j):
                     self_copy = deepcopy(self)
-                    self_copy.delete_edge(start_vertex, finish_vertex)
-                    if not self_copy.is_connected():
-                        bridges.append((start_vertex, finish_vertex))
+                    self_copy_vertices = self_copy.get_vertices()
+                    self_copy.delete_edge(i, j)
+                    if (
+                        (
+                            not self_copy.is_connected(skip_empty_vertices=True) or
+                            (
+                                self_copy.is_connected(skip_empty_vertices=True) and
+                                self_copy_vertices > self_copy.get_vertices() and
+                                i in self_copy_vertices and
+                                j in self_copy_vertices
+                            )
+                        ) and
+                        (i, j) not in bridges and (j, i) not in bridges
+                    ):
+                        bridges.append((i, j))
         return bridges
 
-    def get_connected_components(self):
+    def get_connected_components(self, return_bridges=False):
         """ Получить компоненты связности """
         connected_components = []
         graph_without_bridges = deepcopy(self)
-        bridges = self.get_bridges()
-        for bridge in bridges:
-            if graph_without_bridges.has_edge(*bridge):
-                graph_without_bridges.delete_edge(*bridge)
 
-        def run(vertex, connected_component=None):
+        def iteration(vertex, connected_component=None):
             if connected_component is None:
                 connected_component = ConnectedComponent(
                     adjacency_matrix=self.create_empty_adjacency_matrix_copy()
@@ -183,16 +189,34 @@ class Graph(object):
             for adjacent_vertex in adjacent_vertices:
                 connected_component.create_edge(vertex, adjacent_vertex)
                 graph_without_bridges.delete_edge(vertex, adjacent_vertex)
-                run(adjacent_vertex, connected_component)
+                iteration(adjacent_vertex, connected_component)
 
-        while True:
-            vertices = graph_without_bridges.get_vertices()
-            if not vertices:
-                break
-            else:
-                run(vertices.pop())
+        def run():
+            while True:
+                vertices = graph_without_bridges.get_vertices()
+                if not vertices:
+                    break
+                else:
+                    iteration(vertices.pop())
 
-        return connected_components
+        run()
+
+        all_bridges = set()
+        temp_connected_components = deepcopy(connected_components)
+        connected_components = []
+        graph_without_bridges = deepcopy(self)
+        for temp_connected_component in temp_connected_components:
+            bridges = temp_connected_component.get_bridges()
+            all_bridges.update(set(bridges))
+            for bridge in bridges:
+                if graph_without_bridges.has_edge(*bridge):
+                    graph_without_bridges.delete_edge(*bridge)
+        run()
+
+        if return_bridges:
+            return connected_components, all_bridges
+        else:
+            return connected_components
 
     def get_simple_cycle(self, start_vertex, path=None, *, save_start_vertex=False):
         """ Поиск простого цикла """
@@ -236,7 +260,7 @@ class Graph(object):
 
         return []
 
-    def is_connected(self, start_vertex=None):
+    def is_connected(self, start_vertex=None, *, skip_empty_vertices=False):
         """ Проверить граф на связность """
         if start_vertex is None:
             vertices = self.get_vertices()
@@ -246,7 +270,7 @@ class Graph(object):
                 raise ValueError('Граф пуст')
         path = [start_vertex]
         i = 0
-        len_ = len(self)
+        len_ = len(self) if not skip_empty_vertices else len(self.get_vertices())
         while len(path) != len_:
             if i >= len(path):
                 return False
@@ -544,17 +568,21 @@ class GammaGraph(Graph):
             adjacency_matrix=adjacency_matrix if adjacency_matrix is not None else original_graph.ADJACENCY_MATRIX,
             chain=chain, type_=type_, len_=len_
         )
+        connected_components, bridges = self.get_connected_components(return_bridges=True)
         self.connected_components = [
             _GammaGraphConnectedComponent(original_graph=connected_component)
             for connected_component
-            in self.get_connected_components()
+            in connected_components
         ]
+        self.bridges = bridges
         self.faces = []
         self.faces_hierarchy = []
         for connected_component in self.connected_components:
             self.faces.extend(connected_component.faces)
             self.faces_hierarchy.extend(connected_component.faces_hierarchy)
 
+    def get_bridges(self):
+        return self.bridges
 
 if __name__ == '__main__':
     # import sys
@@ -715,10 +743,196 @@ if __name__ == '__main__':
         [0, 0, 1, 0, 0],
     ]
 
+    matrix16 = [
+        [0, 1, 1, 1, 0, 0, 0, 0, 0],
+        [1, 0, 1, 1, 0, 0, 0, 0, 0],
+        [1, 1, 0, 1, 0, 0, 0, 0, 0],
+        [1, 1, 1, 0, 0, 0, 0, 0, 1],
+        [0, 0, 0, 0, 0, 1, 1, 1, 0],
+        [0, 0, 0, 0, 1, 0, 1, 1, 1],
+        [0, 0, 0, 0, 1, 1, 0, 1, 0],
+        [0, 0, 0, 0, 1, 1, 1, 0, 0],
+        [0, 0, 0, 1, 0, 1, 0, 0, 0],
+    ]
+
+    matrix17 = [
+        [0, 0, 1, 1, 0, 1],
+        [0, 0, 1, 1, 0, 1],
+        [1, 1, 0, 0, 1, 0],
+        [1, 1, 0, 0, 1, 0],
+        [0, 0, 1, 1, 0, 0],
+        [1, 1, 0, 0, 0, 0],
+    ]
+
+    matrix18 = [
+        [0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0],
+    ]
+
+    matrix19 = [
+        [0, 1, 1, 1, 0],
+        [1, 0, 1, 0, 0],
+        [1, 1, 0, 1, 1],
+        [1, 0, 1, 0, 0],
+        [0, 0, 1, 0, 0],
+    ]
+
+    matrix20 = [
+        [0, 1, 1, 0, 1, 1],
+        [1, 0, 0, 1, 0, 0],
+        [1, 0, 0, 1, 1, 1],
+        [0, 1, 1, 0, 0, 0],
+        [1, 0, 1, 0, 0, 0],
+        [1, 0, 1, 0, 0, 0],
+    ]
+
+    matrix21 = [
+        [0, 1, 1, 0, 0, 1, 0, 1],
+        [1, 0, 0, 1, 1, 0, 1, 0],
+        [1, 0, 0, 1, 1, 0, 1, 0],
+        [0, 1, 1, 0, 0, 1, 0, 1],
+        [0, 1, 1, 0, 0, 1, 0, 1],
+        [1, 0, 0, 1, 1, 0, 1, 0],
+        [0, 1, 1, 0, 0, 1, 0, 1],
+        [1, 0, 0, 1, 1, 0, 1, 0],
+    ]
+
+    matrix22 = [
+        [0, 1, 1, 0, 1, 0, 1, 0, 1],
+        [1, 0, 0, 1, 0, 0, 1, 1, 1],
+        [1, 0, 0, 1, 1, 1, 0, 0, 1],
+        [0, 1, 1, 0, 0, 1, 0, 1, 1],
+        [1, 0, 1, 0, 0, 1, 1, 0, 0],
+        [0, 0, 1, 1, 1, 0, 0, 1, 0],
+        [1, 1, 0, 0, 1, 0, 0, 1, 0],
+        [0, 1, 0, 1, 0, 1, 1, 0, 0],
+        [1, 1, 1, 1, 0, 0, 0, 0, 0],
+    ]
+
+    matrix23 = [
+        [0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
+        [0, 0, 1, 0, 0, 0, 0, 0, 0, 1],
+        [0, 1, 0, 1, 0, 0, 0, 0, 0, 0],
+        [0, 0, 1, 0, 1, 0, 0, 0, 0, 0],
+        [0, 0, 0, 1, 0, 1, 0, 0, 0, 0],
+        [0, 0, 0, 0, 1, 0, 1, 0, 0, 0],
+        [0, 0, 0, 0, 0, 1, 0, 1, 0, 0],
+        [0, 0, 0, 0, 0, 0, 1, 0, 1, 0],
+        [1, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+        [1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+    ]
+
+    matrix24 = [
+        [0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1],
+        [0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0],
+        [0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1],
+        [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0],
+    ]
+
+    matrix25 = [
+        [0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+        [1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+        [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0],
+    ]
+
+    matrix26 = [
+        [0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0],
+        [0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0],
+        [1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+        [0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+        [0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0],
+        [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    ]
+
+    matrix27 = [
+        [0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
+        [1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0],
+        [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1],
+        [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0],
+    ]
+
     for k, matrix in enumerate(
         (
             matrix1, matrix2, matrix3, matrix4, matrix5, matrix6, matrix7, matrix8, matrix9, matrix10, matrix11,
-            matrix12, matrix13, matrix14, matrix15
+            matrix12, matrix13, matrix14, matrix15, matrix16, matrix17, matrix18, matrix19, matrix20, matrix21,
+            matrix22, matrix23, matrix24, matrix25, matrix26, matrix27,
         ),
         start=1
     ):
